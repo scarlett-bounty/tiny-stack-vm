@@ -1,98 +1,192 @@
-import{mkdirSync,readdirSync,readFileSync,writeFileSync}from'node:fs';
-const T="@AADFJKO00000000IIIIIIIEIIIEIII0III0000000000000@DD@@00000000000EH00000000000000DDAD";
-function run(p:Uint8Array,q:Uint8Array):[number,Uint8Array]{
- const D=new Int32Array(256),C=new Int32Array(64),M=new Int32Array(256),o=new Uint8Array(65536);
- let s=0,c=0,pc=0,ip=0,t=0,l=0;
- const d=(x:number):[number,Uint8Array]=>[x,o.subarray(0,l)];
- for(;;){
-  if(t===1e6)return d(10);
-  if(pc<0||pc>=p.length)return d(9);
-  const b=p[pc];
-  if(b>83)return d(5);
-  const k=T.charCodeAt(b)-48;
-  if(k<16)return d(5);
-  const m=b===1?1:b===2?4:b>=48&&b<=51?2:0;
-  if(pc+m>=p.length)return d(9);
-  t++;
-  const n=pc+1+m,u=(k>>2)&3,v=k&3;
-  if(s<u)return d(2);
-  if(s-u+v>256)return d(3);
-  pc=n;
-  switch(b){
-   case 0:return d(0);
-   case 1:D[s++]=(p[n-1]<<24)>>24;break;
-   case 2:D[s++]=p[n-4]|p[n-3]<<8|p[n-2]<<16|p[n-1]<<24;break;
-   case 3:s--;break;
-   case 4:D[s]=D[s-1];s++;break;
-   case 5:{const x=D[s-1];D[s-1]=D[s-2];D[s-2]=x;break;}
-   case 6:D[s]=D[s-2];s++;break;
-   case 7:{const x=D[s-3];D[s-3]=D[s-2];D[s-2]=D[s-1];D[s-1]=x;break;}
-   case 23:D[s-1]=-D[s-1]|0;break;
-   case 27:D[s-1]=~D[s-1];break;
-   case 48:case 49:case 50:{
-    const r=(p[n-2]|p[n-1]<<8)<<16>>16;
-    let f=b===48;
-    if(b!==48){const w=D[--s];f=b===49?w===0:w!==0;}
-    if(f)pc=n+r;
-    break;}
-   case 51:
-    if(c===64)return d(7);
-    C[c++]=n;pc=p[n-2]|p[n-1]<<8;
-    break;
-   case 52:
-    if(c===0)return d(8);
-    pc=C[--c];
-    break;
-   case 64:{
-    const a=D[s-1];
-    if(a<0||a>=256)return d(6);
-    D[s-1]=M[a];
-    break;}
-   case 65:{
-    const a=D[s-1],w=D[s-2];
-    if(a<0||a>=256)return d(6);
-    s-=2;M[a]=w;
-    break;}
-   case 80:{
-    const g=String(D[s-1]);
-    if(l+g.length>65536)return d(11);
-    s--;
-    for(let i=0;i<g.length;i++)o[l++]=g.charCodeAt(i);
-    break;}
-   case 81:
-    if(l+1>65536)return d(11);
-    o[l++]=D[--s]&255;
-    break;
-   case 82:D[s++]=ip<q.length?q[ip++]:-1;break;
-   case 83:return d(D[--s]&255);
-   default:{
-    const y=D[s-1],x=D[s-2];
-    let r:number;
-    if(b===16)r=(x+y)|0;
-    else if(b===17)r=(x-y)|0;
-    else if(b===18)r=Math.imul(x,y);
-    else if(b===19){if(!y)return d(4);r=x===-2147483648&&y===-1?x:(x/y)|0;}
-    else if(b===20){if(!y)return d(4);r=y===-1?0:(x%y)|0;}
-    else if(b===21){if(!y)return d(4);r=Math.floor((x>>>0)/(y>>>0))|0;}
-    else if(b===22){if(!y)return d(4);r=((x>>>0)%(y>>>0))|0;}
-    else if(b===24)r=x&y;
-    else if(b===25)r=x|y;
-    else if(b===26)r=x^y;
-    else if(b===28)r=x<<(y&31);
-    else if(b===29)r=x>>(y&31);
-    else if(b===30)r=(x>>>(y&31))|0;
-    else if(b===32)r=x===y?1:0;
-    else if(b===33)r=x<y?1:0;
-    else r=(x>>>0)<(y>>>0)?1:0;
-    s-=2;D[s++]=r;
-    break;}
+// Tiny stack VM (ISA v1).
+import { readdirSync, readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
+
+const inDir = process.env.MAKEFUN_INPUT_DIR || "/input";
+const outDir = process.env.MAKEFUN_OUTPUT_DIR || "/output";
+const MAX_STEPS = 1000000;
+const MAX_OUT = 65536;
+
+function run(prog, input) {
+  const st = [];
+  const cs = [];
+  const mem = new Int32Array(256);
+  const out = [];
+  let pc = 0;
+  let steps = 0;
+  let ip = 0;
+  try {
+    for (;;) {
+      if (steps >= MAX_STEPS) throw 10;
+      if (pc < 0 || pc >= prog.length) throw 9;
+      const op = prog[pc];
+      const known =
+        op <= 0x07 ||
+        (op >= 0x10 && op <= 0x22) ||
+        (op >= 0x30 && op <= 0x34) ||
+        (op >= 0x40 && op <= 0x41) ||
+        (op >= 0x50 && op <= 0x53);
+      if (!known) throw 5;
+      const imm = op === 0x01 ? 1 : op === 0x02 ? 4 : op >= 0x30 && op <= 0x33 ? 2 : 0;
+      if (pc + 1 + imm > prog.length) throw 9;
+      steps++;
+      let next = pc + 1 + imm;
+      switch (op) {
+        case 0x00: // HALT
+          return { out, code: 0 };
+        case 0x01: { // PUSH8: byte sign-extended
+          if (st.length >= 256) throw 3;
+          let v = prog[pc + 1];
+          if (v >= 128) v -= 256;
+          st.push(v);
+          break;
+        }
+        case 0x02: // PUSH32: four bytes, little-endian, signed
+          if (st.length >= 256) throw 3;
+          st.push(prog[pc + 1] | (prog[pc + 2] << 8) | (prog[pc + 3] << 16) | (prog[pc + 4] << 24));
+          break;
+        case 0x03: // POP
+          if (st.length < 1) throw 2;
+          st.pop();
+          break;
+        case 0x04: // DUP
+          if (st.length < 1) throw 2;
+          if (st.length >= 256) throw 3;
+          st.push(st[st.length - 1]);
+          break;
+        case 0x05: { // SWAP
+          if (st.length < 2) throw 2;
+          const t = st[st.length - 1];
+          st[st.length - 1] = st[st.length - 2];
+          st[st.length - 2] = t;
+          break;
+        }
+        case 0x06: // OVER
+          if (st.length < 2) throw 2;
+          if (st.length >= 256) throw 3;
+          st.push(st[st.length - 2]);
+          break;
+        case 0x07: { // ROT: ( a b c -- b c a )
+          if (st.length < 3) throw 2;
+          const a = st[st.length - 3];
+          st[st.length - 3] = st[st.length - 2];
+          st[st.length - 2] = st[st.length - 1];
+          st[st.length - 1] = a;
+          break;
+        }
+        case 0x10: case 0x11: case 0x12: case 0x13: case 0x14: case 0x15: case 0x16:
+        case 0x18: case 0x19: case 0x1a: case 0x1c: case 0x1d: case 0x1e:
+        case 0x20: case 0x21: case 0x22: { // two-operand ops
+          if (st.length < 2) throw 2;
+          const b = st.pop();
+          const a = st.pop();
+          let r;
+          if (op === 0x10) r = (a + b) | 0;
+          else if (op === 0x11) r = (a - b) | 0;
+          else if (op === 0x12) r = Math.imul(a, b);
+          else if (op === 0x13) { if (b === 0) throw 4; r = (a / b) | 0; }
+          else if (op === 0x14) { if (b === 0) throw 4; r = (a % b) | 0; }
+          else if (op === 0x15) { if (b === 0) throw 4; r = ((a >>> 0) / (b >>> 0)) | 0; }
+          else if (op === 0x16) { if (b === 0) throw 4; r = ((a >>> 0) % (b >>> 0)) | 0; }
+          else if (op === 0x18) r = a & b;
+          else if (op === 0x19) r = a | b;
+          else if (op === 0x1a) r = a ^ b;
+          else if (op === 0x1c) r = a << (b & 31);
+          else if (op === 0x1d) r = a >> (b & 31);
+          else if (op === 0x1e) r = (a >>> (b & 31)) | 0;
+          else if (op === 0x20) r = a === b ? 1 : 0;
+          else if (op === 0x21) r = a < b ? 1 : 0;
+          else r = (a >>> 0) < (b >>> 0) ? 1 : 0;
+          st.push(r);
+          break;
+        }
+        case 0x17: // NEG, wraps
+          if (st.length < 1) throw 2;
+          st[st.length - 1] = (-st[st.length - 1]) | 0;
+          break;
+        case 0x1b: // NOT
+          if (st.length < 1) throw 2;
+          st[st.length - 1] = ~st[st.length - 1];
+          break;
+        case 0x30: { // JMP: signed offset from the next instruction
+          let off = prog[pc + 1] | (prog[pc + 2] << 8);
+          off = (off << 16) >> 16;
+          next = pc + 3 + off;
+          break;
+        }
+        case 0x31: case 0x32: { // JZ / JNZ
+          if (st.length < 1) throw 2;
+          const v = st.pop();
+          if ((op === 0x31 && v === 0) || (op === 0x32 && v !== 0)) {
+            let off = prog[pc + 1] | (prog[pc + 2] << 8);
+            off = (off << 16) >> 16;
+            next = pc + 3 + off;
+          }
+          break;
+        }
+        case 0x33: { // CALL: unsigned absolute target
+          if (cs.length >= 64) throw 7;
+          cs.push(pc + 3);
+          next = prog[pc + 1] | (prog[pc + 2] << 8);
+          break;
+        }
+        case 0x34: // RET
+          if (cs.length === 0) throw 8;
+          next = cs.pop();
+          break;
+        case 0x40: { // LOAD
+          if (st.length < 1) throw 2;
+          const addr = st.pop();
+          if (addr < 0 || addr > 255) throw 6;
+          st.push(mem[addr]);
+          break;
+        }
+        case 0x41: { // STORE: ( v addr -- )
+          if (st.length < 2) throw 2;
+          const addr = st.pop();
+          const v = st.pop();
+          if (addr < 0 || addr > 255) throw 6;
+          mem[addr] = v;
+          break;
+        }
+        case 0x50: { // PRINT: decimal ASCII, no newline
+          if (st.length < 1) throw 2;
+          const s = String(st.pop());
+          if (out.length + s.length > MAX_OUT) throw 11;
+          for (let i = 0; i < s.length; i++) out.push(s.charCodeAt(i));
+          break;
+        }
+        case 0x51: { // PUTC: one byte, v AND 255
+          if (st.length < 1) throw 2;
+          if (out.length + 1 > MAX_OUT) throw 11;
+          out.push(st.pop() & 255);
+          break;
+        }
+        case 0x52: // IN: next input byte, or -1 when used up
+          if (st.length >= 256) throw 3;
+          st.push(ip < input.length ? input[ip++] : -1);
+          break;
+        case 0x53: { // EXIT: code v AND 255
+          if (st.length < 1) throw 2;
+          return { out, code: st.pop() & 255 };
+        }
+      }
+      pc = next;
+    }
+  } catch (c) {
+    return { out, code: typeof c === "number" ? c : 9 };
   }
- }
 }
-const I=process.env.MAKEFUN_INPUT_DIR??'/input',O=process.env.MAKEFUN_OUTPUT_DIR??'/output';
-for(const id of readdirSync(I).sort()){
- const[c,out]=run(readFileSync(`${I}/${id}/program.bin`),readFileSync(`${I}/${id}/input.bin`));
- mkdirSync(`${O}/${id}`,{recursive:true});
- writeFileSync(`${O}/${id}/stdout.bin`,out);
- writeFileSync(`${O}/${id}/exit.txt`,c+'\n');
+
+const ids = readdirSync(inDir, { withFileTypes: true })
+  .filter((d) => d.isDirectory())
+  .map((d) => d.name)
+  .sort();
+for (const id of ids) {
+  const prog = readFileSync(inDir + "/" + id + "/program.bin");
+  const inPath = inDir + "/" + id + "/input.bin";
+  const input = existsSync(inPath) ? readFileSync(inPath) : Buffer.alloc(0);
+  const { out, code } = run(prog, input);
+  mkdirSync(outDir + "/" + id, { recursive: true });
+  writeFileSync(outDir + "/" + id + "/stdout.bin", Buffer.from(out));
+  writeFileSync(outDir + "/" + id + "/exit.txt", code + "\n");
 }
